@@ -1,0 +1,341 @@
+"""
+Main workflow orchestrator.
+
+Ties together all 8 steps of the wood export bot workflow:
+
+  Step 1  →  Receive & validate buyer form
+  Step 2  →  Dispatch RFQs to suppliers (email + WhatsApp)
+  Step 3  →  Collect & parse supplier responses
+  Step 4  →  Build comparison matrix
+  Step 5  →  Generate buyer quote (best price + 3% markup)
+  Step 6  →  Handle negotiation rounds (max 3)
+  Step 7  →  Calculations engine (units, FX, pricing) — called inline
+  Step 8  →  Freight footnote — appended to quote
+
+State is persisted to Airtable. All integration clients are injected
+so the orchestrator can be unit-tested with mocks.
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+
+from src.buyer.form import BuyerFormInput, form_to_rfq, validate_buyer_form
+from src.buyer.quote_formatter import format_buyer_quote, BuyerQuote
+from src.calculations.fx import get_fx_rates
+from src.calculations.pricing import price_line_item
+from src.freight.footnote import FreightFootnote
+from src.models.rfq import RFQ, RFQStatus
+from src.negotiation.engine import NegotiationEngine, NegotiationResult
+from src.supplier.comparator import build_comparison_matrix, normalise_response_price
+from src.supplier.dispatcher import dispatch_rfq_to_suppliers, DispatchChannel
+from src.supplier.rfq_builder import build_supplier_rfq
+
+logger = logging.getLogger(__name__)
+
+
+class WorkflowStage(str, Enum):
+    CREATED = "created"
+    DISPATCHED = "dispatched"
+    AWAITING_RESPONSES = "awaiting_responses"
+    ANALYSED = "analysed"
+    QUOTED = "quoted"
+    NEGOTIATING = "negotiating"
+    ACCEPTED = "accepted"
+    CLOSED = "closed"
+
+
+@dataclass
+class WorkflowContext:
+    rfq: RFQ
+    stage: WorkflowStage = WorkflowStage.CREATED
+    supplier_quotes: list = field(default_factory=list)
+    comparison_matrix: Optional[object] = None
+    current_quote: Optional[BuyerQuote] = None
+    negotiation_rounds: list = field(default_factory=list)
+    freight: Optional[FreightFootnote] = None
+    errors: list[str] = field(default_factory=list)
+
+
+class WorkflowOrchestrator:
+    def __init__(
+        self,
+        email_client=None,
+        whatsapp_client=None,
+        airtable_client=None,
+        anthropic_client=None,
+        dispatch_channel: DispatchChannel = DispatchChannel.BOTH,
+        markup_pct: float = 0.03,
+    ):
+        self.email_client = email_client
+        self.whatsapp_client = whatsapp_client
+        self.airtable_client = airtable_client
+        self.anthropic_client = anthropic_client
+        self.dispatch_channel = dispatch_channel
+        self.negotiation_engine = NegotiationEngine(markup_pct=markup_pct)
+
+    # ── STEP 1 ─────────────────────────────────────────────────────────────────
+
+    def create_rfq_from_form(self, raw_form: dict) -> tuple[Optional[WorkflowContext], list[str]]:
+        """Validate buyer form and create a workflow context."""
+        form, errors = validate_buyer_form(raw_form)
+        if errors:
+            return None, errors
+        rfq = form_to_rfq(form)
+        logger.info("RFQ created: %s (%d line items)", rfq.id, len(rfq.line_items))
+        return WorkflowContext(rfq=rfq), []
+
+    # ── STEP 2 ─────────────────────────────────────────────────────────────────
+
+    async def dispatch_to_suppliers(
+        self, ctx: WorkflowContext, suppliers: list[dict]
+    ) -> WorkflowContext:
+        """Build per-supplier RFQ payloads and dispatch them."""
+        payloads = [build_supplier_rfq(ctx.rfq, s) for s in suppliers]
+        results = await dispatch_rfq_to_suppliers(
+            payloads,
+            channel=self.dispatch_channel,
+            email_client=self.email_client,
+            whatsapp_client=self.whatsapp_client,
+        )
+        failed = [r.supplier_name for r in results if r.all_failed]
+        if failed:
+            ctx.errors.append(f"Dispatch failed for: {', '.join(failed)}")
+
+        ctx.rfq.status = RFQStatus.SENT_TO_SUPPLIERS
+        ctx.stage = WorkflowStage.DISPATCHED
+        logger.info("Dispatched to %d suppliers (%d failed)", len(results), len(failed))
+        return ctx
+
+    # ── STEPS 3 & 4 ────────────────────────────────────────────────────────────
+
+    def ingest_supplier_response(
+        self,
+        ctx: WorkflowContext,
+        raw_text: str,
+        supplier_id: str,
+        source: str = "whatsapp",
+    ) -> WorkflowContext:
+        """
+        Parse one incoming supplier message and add it to the context.
+        Call this each time a supplier response arrives.
+        """
+        from src.supplier.parser import parse_supplier_response
+        parsed = parse_supplier_response(
+            raw_text=raw_text,
+            supplier_id=supplier_id,
+            rfq_id=ctx.rfq.id,
+            source=source,
+            anthropic_client=self.anthropic_client,
+        )
+        ctx.supplier_quotes.append(parsed)
+        ctx.rfq.status = RFQStatus.RESPONSES_RECEIVED
+        return ctx
+
+    def build_matrix(
+        self,
+        ctx: WorkflowContext,
+        supplier_ratings: Optional[dict] = None,
+    ) -> WorkflowContext:
+        """Build comparison matrix from all collected supplier quotes."""
+        from src.models.supplier import SupplierQuote, RFQLineResponse
+        supplier_quotes_domain = _parsed_to_domain(ctx.supplier_quotes, ctx.rfq)
+        ctx.comparison_matrix = build_comparison_matrix(
+            rfq_id=ctx.rfq.id,
+            supplier_quotes=supplier_quotes_domain,
+            supplier_ratings=supplier_ratings or {},
+        )
+        ctx.stage = WorkflowStage.ANALYSED
+        return ctx
+
+    # ── STEP 5 ─────────────────────────────────────────────────────────────────
+
+    def generate_quote(
+        self,
+        ctx: WorkflowContext,
+        freight: Optional[FreightFootnote] = None,
+    ) -> WorkflowContext:
+        """Generate buyer quote using best supplier per line item."""
+        if ctx.comparison_matrix is None:
+            ctx.errors.append("Cannot generate quote: comparison matrix not built")
+            return ctx
+
+        fx = get_fx_rates()
+        priced_items = []
+        media_by_line: dict[str, list[str]] = {}
+
+        for line_item in ctx.rfq.line_items:
+            best = ctx.comparison_matrix.best_for_line(line_item.id)
+            if not best:
+                ctx.errors.append(f"No supplier response for line item {line_item.id}")
+                continue
+
+            priced = price_line_item(
+                rfq_line_item_id=line_item.id,
+                supplier_id=best["supplier_id"],
+                supplier_price_usd_per_cbm=best["price_usd_per_cbm"],
+                total_cbm=line_item.total_cbm,
+                fx=fx,
+            )
+            priced_items.append(priced)
+
+            # Collect media (photos/videos) — supplier identity hidden
+            all_options = ctx.comparison_matrix.line_comparisons[line_item.id].options
+            media_by_line[line_item.id] = [
+                url
+                for opt in all_options
+                for url in opt.get("media_urls", [])
+            ]
+
+        ctx.freight = freight
+        ctx.current_quote = format_buyer_quote(
+            rfq=ctx.rfq,
+            priced_items=priced_items,
+            media_by_line=media_by_line,
+            freight_footnote=freight,
+            fx=fx,
+        )
+        ctx.rfq.status = RFQStatus.QUOTE_SENT
+        ctx.stage = WorkflowStage.QUOTED
+        logger.info("Quote generated: %s", ctx.current_quote.quote_ref)
+        return ctx
+
+    # ── STEP 6 ─────────────────────────────────────────────────────────────────
+
+    def handle_negotiation(
+        self,
+        ctx: WorkflowContext,
+        buyer_target_rate: float,
+        buyer_target_currency: str,
+    ) -> tuple[WorkflowContext, NegotiationResult]:
+        """Process one buyer counter-offer."""
+        if not ctx.comparison_matrix:
+            raise ValueError("No comparison matrix available for negotiation")
+
+        # Find the overall cheapest supplier rate across all line items
+        best_prices = [
+            comp.cheapest_price_usd
+            for comp in ctx.comparison_matrix.line_comparisons.values()
+            if comp.cheapest_price_usd is not None
+        ]
+        if not best_prices:
+            raise ValueError("No supplier prices available")
+
+        # Use the average best price across line items as the floor
+        avg_best_price = sum(best_prices) / len(best_prices)
+
+        result = self.negotiation_engine.evaluate(
+            rfq=ctx.rfq,
+            buyer_target_rate=buyer_target_rate,
+            buyer_target_currency=buyer_target_currency,
+            best_supplier_price_usd_per_cbm=avg_best_price,
+        )
+
+        round_record = self.negotiation_engine.record_round(ctx.rfq, result)
+        ctx.negotiation_rounds.append(round_record)
+        ctx.rfq.status = RFQStatus.NEGOTIATING
+        ctx.stage = WorkflowStage.NEGOTIATING
+
+        # If feasible, regenerate the quote at the buyer's target rate
+        if result.status.value == "feasible":
+            ctx = self._regenerate_at_target(ctx, result.buyer_target_usd)
+
+        return ctx, result
+
+    def _regenerate_at_target(
+        self, ctx: WorkflowContext, buyer_target_usd_per_cbm: float
+    ) -> WorkflowContext:
+        """Regenerate quote using buyer's accepted target rate (still hides supplier)."""
+        fx = get_fx_rates()
+        priced_items = []
+        media_by_line: dict[str, list[str]] = {}
+
+        for line_item in ctx.rfq.line_items:
+            from src.calculations.pricing import PricedLineItem
+            mc = fx.multi_currency(buyer_target_usd_per_cbm * line_item.total_cbm)
+            mc_rate = fx.multi_currency(buyer_target_usd_per_cbm)
+            best = ctx.comparison_matrix.best_for_line(line_item.id)
+            priced = PricedLineItem(
+                rfq_line_item_id=line_item.id,
+                supplier_id=best["supplier_id"] if best else "unknown",
+                total_cbm=line_item.total_cbm,
+                supplier_price_usd_per_cbm=best["price_usd_per_cbm"] if best else 0,
+                buyer_price_usd_per_cbm=buyer_target_usd_per_cbm,
+                markup_pct=0,  # custom rate accepted
+                total_usd=mc["USD"],
+                total_inr=mc["INR"],
+                total_idr=mc["IDR"],
+                rate_per_cbm_usd=mc_rate["USD"],
+                rate_per_cbm_inr=mc_rate["INR"],
+                rate_per_cbm_idr=mc_rate["IDR"],
+            )
+            priced_items.append(priced)
+            if ctx.comparison_matrix:
+                all_opts = ctx.comparison_matrix.line_comparisons.get(line_item.id)
+                media_by_line[line_item.id] = [
+                    url for opt in (all_opts.options if all_opts else [])
+                    for url in opt.get("media_urls", [])
+                ]
+
+        ctx.current_quote = format_buyer_quote(
+            rfq=ctx.rfq,
+            priced_items=priced_items,
+            media_by_line=media_by_line,
+            freight_footnote=ctx.freight,
+            fx=fx,
+        )
+        return ctx
+
+
+def _parsed_to_domain(parsed_responses: list, rfq: RFQ) -> list:
+    """
+    Convert ParsedResponse objects to SupplierQuote domain objects
+    for use in the comparison matrix.
+    This is a bridge between the parser output and the domain model.
+    """
+    from src.models.supplier import SupplierQuote, RFQLineResponse
+    from src.models.rfq import Currency
+
+    quotes = []
+    for parsed in parsed_responses:
+        line_responses = []
+        for i, item in enumerate(parsed.line_items):
+            # Match to RFQ line items by position (best effort)
+            if i < len(rfq.line_items):
+                rfq_line_id = rfq.line_items[i].id
+            else:
+                rfq_line_id = rfq.line_items[-1].id
+
+            try:
+                currency = Currency(item.price_currency.upper())
+            except ValueError:
+                currency = Currency.USD
+
+            lr = RFQLineResponse(
+                rfq_id=rfq.id,
+                rfq_line_item_id=rfq_line_id,
+                supplier_id=parsed.supplier_id,
+                price_per_unit=item.price_per_unit,
+                price_currency=currency,
+                price_unit=item.price_unit,
+                quality_grade=item.quality_grade,
+                lead_time_days=item.lead_time_days,
+                raw_response=parsed.raw_text,
+            )
+            # Normalise to USD/CBM immediately
+            from src.calculations.fx import get_fx_rates
+            fx = get_fx_rates()
+            price_usd = fx.to_usd(item.price_per_unit, currency.value)
+            if item.price_unit == "cbm":
+                lr.price_usd_per_cbm = round(price_usd, 4)
+            line_responses.append(lr)
+
+        quotes.append(SupplierQuote(
+            rfq_id=rfq.id,
+            supplier_id=parsed.supplier_id,
+            supplier_name=parsed.supplier_id,  # name resolved by caller if needed
+            line_responses=line_responses,
+        ))
+    return quotes
