@@ -105,7 +105,9 @@ class NegotiationEngine:
 
         logger.info(
             "Negotiation round %d for RFQ %s: %s (target=%.2f USD, min=%.2f USD)",
-            rfq.negotiation_rounds + 1, rfq.id, status.value, buyer_target_usd, minimum_usd,
+            rfq.negotiation_rounds + 1, rfq.id,
+            status.value if hasattr(status, "value") else status,
+            buyer_target_usd, minimum_usd,
         )
 
         return NegotiationResult(

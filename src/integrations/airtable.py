@@ -36,6 +36,8 @@ class AirtableClient:
     def _url(self, table: str) -> str:
         return f"{AIRTABLE_API_BASE}/{self.base_id}/{table}"
 
+    _TIMEOUT = 30.0  # seconds — Airtable cold-start can be slow
+
     def list_records(
         self,
         table: str,
@@ -46,7 +48,10 @@ class AirtableClient:
         if filter_formula:
             params["filterByFormula"] = filter_formula
 
-        resp = httpx.get(self._url(table), headers=self._headers, params=params)
+        resp = httpx.get(
+            self._url(table), headers=self._headers, params=params,
+            timeout=self._TIMEOUT,
+        )
         resp.raise_for_status()
         return resp.json().get("records", [])
 
@@ -55,6 +60,7 @@ class AirtableClient:
             self._url(table),
             headers=self._headers,
             json={"fields": fields},
+            timeout=self._TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json()
@@ -64,7 +70,13 @@ class AirtableClient:
             f"{self._url(table)}/{record_id}",
             headers=self._headers,
             json={"fields": fields},
+            timeout=self._TIMEOUT,
         )
+        if not resp.is_success:
+            logger.error(
+                "Airtable PATCH %s/%s → %s: %s",
+                table, record_id, resp.status_code, resp.text,
+            )
         resp.raise_for_status()
         return resp.json()
 
@@ -73,14 +85,14 @@ class AirtableClient:
     def get_suppliers_for_species(self, wood_species: str) -> list[dict]:
         """Return active suppliers that handle the given wood species."""
         formula = (
-            f"AND({{active}}=1, FIND('{wood_species}', ARRAYJOIN({{wood_specialisms}}, ',')))"
+            f"AND({{Active}}=1, FIND('{wood_species}', ARRAYJOIN({{Wood Specialisms}}, ',')))"
         )
         records = self.list_records("Suppliers", filter_formula=formula)
-        return [r["fields"] | {"_id": r["id"]} for r in records]
+        return [_normalise_supplier(r) for r in records]
 
     def get_all_active_suppliers(self) -> list[dict]:
-        records = self.list_records("Suppliers", filter_formula="{active}=1")
-        return [r["fields"] | {"_id": r["id"]} for r in records]
+        records = self.list_records("Suppliers", filter_formula="{Active}=1")
+        return [_normalise_supplier(r) for r in records]
 
     # ── RFQ state helpers ──────────────────────────────────────────────────────
 
@@ -91,6 +103,28 @@ class AirtableClient:
 
     def update_rfq_status(self, airtable_record_id: str, status: str) -> None:
         self.update_record("RFQs", airtable_record_id, {"status": status})
+
+
+def _normalise_supplier(record: dict) -> dict:
+    """
+    Map Airtable title-case field names to the snake_case keys
+    expected by rfq_builder and the rest of the codebase.
+    """
+    f = record.get("fields", {})
+    return {
+        "id": record.get("id", ""),
+        "_id": record.get("id", ""),
+        "name": f.get("Name", ""),
+        "email": f.get("Email", ""),
+        "whatsapp": f.get("WhatsApp", ""),
+        "country": f.get("Country", ""),
+        "wood_specialisms": f.get("Wood Specialisms", []),
+        "preferred_unit": f.get("Preferred Unit", "m"),
+        "preferred_currency": f.get("Preferred Currency", "USD"),
+        "rating": f.get("Rating", 5),
+        "active": f.get("Active", False),
+        "notes": f.get("Notes", ""),
+    }
 
 
 def get_airtable_client() -> Optional[AirtableClient]:

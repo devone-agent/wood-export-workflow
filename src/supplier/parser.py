@@ -169,6 +169,10 @@ def _parse_with_regex(text: str) -> list[ParsedLineItem]:
     lead_time = int(lead_match.group("days")) if lead_match else None
 
     for match in _PRICE_REGEX.finditer(text):
+        # Require at least one of: currency symbol or unit — bare numbers are
+        # likely list indices ("1.", "2."), quantities, or lead-time days, not prices.
+        if not match.group("currency") and not match.group("unit"):
+            continue
         price_str = match.group("price").replace(",", "")
         try:
             price = float(price_str)

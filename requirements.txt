@@ -9,8 +9,7 @@ anthropic>=0.28.0
 
 # Integrations
 twilio>=9.0.0
-google-auth>=2.29.0
-google-api-python-client>=2.128.0
+# email uses Python built-ins: smtplib, imaplib, email — no extra package needed
 
 # Data / config
 python-dotenv>=1.0.0

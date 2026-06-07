@@ -129,6 +129,15 @@ class BuyerQuote:
         }
 
 
+def _ev(x) -> str:
+    """
+    Get the plain string value from a str Enum member or a plain string.
+    Robust to Pydantic v2 round-trips that may deserialize str Enums as
+    plain strings (which don't have a `.value` attribute).
+    """
+    return x.value if hasattr(x, "value") else x
+
+
 def format_buyer_quote(
     rfq: RFQ,
     priced_items: list[PricedLineItem],  # one per line item
@@ -157,7 +166,7 @@ def format_buyer_quote(
         def _fmt_dim(l, w, h, u): return f"{l:.0f} × {w:.0f} × {h:.0f} {u}"
 
         dims_cm_str = _fmt_dim(
-            dims_cm.length, dims_cm.width, dims_cm.height, dims_cm.unit.value
+            dims_cm.length, dims_cm.width, dims_cm.height, _ev(dims_cm.unit)
         )
         dims_ft_str = _fmt_dim(
             dims_m.length / 0.3048, dims_m.width / 0.3048, dims_m.height / 0.3048, "ft"
@@ -165,16 +174,16 @@ def format_buyer_quote(
 
         rows.append(QuoteGridRow(
             line_num=i,
-            product=line_item.product_type.value.replace("_", " ").title(),
-            wood_species=line_item.wood_species.value.replace("_", " ").title(),
-            quality_grade=line_item.quality_grade.value,
+            product=_ev(line_item.product_type).replace("_", " ").title(),
+            wood_species=_ev(line_item.wood_species).replace("_", " ").title(),
+            quality_grade=_ev(line_item.quality_grade),
             dimensions_cm=dims_cm_str,
             dimensions_ft=dims_ft_str,
             cbm_per_unit=round(line_item.dimensions.cbm, 6),
             quantity=line_item.quantity,
-            quantity_unit=line_item.quantity_unit.value,
+            quantity_unit=_ev(line_item.quantity_unit),
             total_cbm=round(priced.total_cbm, 4),
-            container_size=line_item.container_size.value,
+            container_size=_ev(line_item.container_size),
             rate_per_cbm_usd=priced.rate_per_cbm_usd,
             rate_per_cbm_inr=priced.rate_per_cbm_inr,
             rate_per_cbm_idr=priced.rate_per_cbm_idr,

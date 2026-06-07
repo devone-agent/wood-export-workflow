@@ -1,0 +1,15 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[[services]]
+name = "wood-export-bot"
+
+[services.healthcheck]
+path = "/health"
+intervalSeconds = 30
+timeoutSeconds = 10

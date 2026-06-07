@@ -1,7 +1,7 @@
 """
 Step 2 — Dispatch RFQ payloads to suppliers via Email and WhatsApp.
 
-Email:     Gmail API (via integration layer) or SMTP fallback
+Email:     SendGrid Web API v3 (via src.integrations.email.EmailClient)
 WhatsApp:  Twilio WhatsApp Business API
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ class DispatchResult:
 async def dispatch_rfq_to_suppliers(
     payloads: list[SupplierRFQPayload],
     channel: DispatchChannel = DispatchChannel.BOTH,
-    email_client=None,      # injected: src.integrations.gmail.GmailClient
+    email_client=None,      # injected: src.integrations.email.EmailClient
     whatsapp_client=None,   # injected: src.integrations.whatsapp.WhatsAppClient
 ) -> list[DispatchResult]:
     """
@@ -79,6 +79,7 @@ async def _dispatch_one(
                     to=payload.supplier_email,
                     subject=payload.email_subject,
                     body=payload.email_body,
+                    html_body=payload.email_html or None,
                 )
                 result.email_sent = True
                 result.email_message_id = msg_id

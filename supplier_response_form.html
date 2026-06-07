@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wood Export — Supplier Quote Submission</title>
+<style>
+  :root {
+    --brown:     #5c3d1e;
+    --brown-lt:  #7a5230;
+    --gold:      #c8922a;
+    --gold-lt:   #e8b04a;
+    --cream:     #faf6f0;
+    --warm-grey: #f0e9df;
+    --border:    #d4c4ad;
+    --text:      #2c1a0e;
+    --text-muted:#7a6652;
+    --success:   #2d6a4f;
+    --error:     #c0392b;
+    --radius:    8px;
+    --shadow:    0 2px 12px rgba(92,61,30,.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--warm-grey); color: var(--text); min-height: 100vh; }
+
+  header { background: var(--brown); color: #fff; padding: 20px 32px; display: flex; align-items: center; gap: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  header .logo { font-size: 28px; }
+  header h1 { font-size: 1.4rem; font-weight: 600; }
+  header p  { font-size: .82rem; opacity: .75; margin-top: 2px; }
+
+  main { max-width: 800px; margin: 32px auto; padding: 0 16px 60px; }
+
+  .rfq-info { background: var(--cream); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; display: flex; gap: 32px; flex-wrap: wrap; }
+  .rfq-info .field { display: flex; flex-direction: column; gap: 2px; }
+  .rfq-info .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+  .rfq-info .value { font-size: .95rem; font-weight: 600; color: var(--brown); }
+
+  .section { background: var(--cream); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow); }
+  .section-title { font-size: 1rem; font-weight: 700; color: var(--brown); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid var(--gold); display: flex; align-items: center; gap: 8px; }
+  .section-title .num { background: var(--gold); color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: .75rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+  .item-header { background: var(--warm-grey); border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; border-left: 3px solid var(--gold); }
+  .item-header h3 { font-size: .95rem; font-weight: 700; color: var(--brown); }
+  .item-header p  { font-size: .82rem; color: var(--text-muted); margin-top: 3px; }
+  .item-header .target { font-size: .78rem; color: var(--gold); margin-top: 4px; font-weight: 600; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  @media (max-width: 540px) { .form-grid { grid-template-columns: 1fr; } }
+  .form-grid.three { grid-template-columns: 2fr 1fr 1fr; }
+
+  .field label { display: block; font-size: .78rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .3px; }
+  .field input, .field select, .field textarea {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: .92rem; background: #fff; color: var(--text); transition: border .15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(200,146,42,.12); }
+  .field textarea { resize: vertical; min-height: 70px; }
+
+  .price-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; align-items: end; }
+
+  .btn-submit {
+    width: 100%; padding: 14px; background: var(--gold); color: #fff; border: none;
+    border-radius: var(--radius); font-size: 1rem; font-weight: 700; cursor: pointer;
+    letter-spacing: .3px; transition: background .15s; margin-top: 8px;
+  }
+  .btn-submit:hover { background: var(--gold-lt); }
+  .btn-submit:disabled { opacity: .6; cursor: not-allowed; }
+
+  .banner { padding: 14px 18px; border-radius: var(--radius); margin-bottom: 20px; font-size: .9rem; font-weight: 500; display: none; }
+  .banner.success { background: #d4edda; border: 1px solid #a3d9b3; color: var(--success); }
+  .banner.error   { background: #fde8e8; border: 1px solid #f5b7b1; color: var(--error); }
+  .banner.show    { display: block; }
+
+  .spinner { display: none; text-align: center; padding: 24px; color: var(--text-muted); font-size: .9rem; }
+  .spinner.show { display: block; }
+  .spinner::before { content: '⏳ '; }
+
+  .loading-skeleton { background: var(--warm-grey); border-radius: 6px; height: 120px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🪵</div>
+  <div>
+    <h1>Supplier Quote Submission</h1>
+    <p>Wood Export Bot — Indonesia → India</p>
+  </div>
+</header>
+
+<main>
+  <div id="errorBanner" class="banner error"></div>
+  <div id="successBanner" class="banner success"></div>
+
+  <div id="loadingMsg" class="loading-skeleton">Loading RFQ details…</div>
+
+  <div id="formContainer" style="display:none">
+
+    <!-- RFQ info bar -->
+    <div class="rfq-info" id="rfqInfo"></div>
+
+    <form id="quoteForm">
+      <!-- Line items injected here -->
+      <div id="lineItems"></div>
+
+      <!-- General notes -->
+      <div class="section">
+        <div class="section-title"><span class="num">✉</span> Additional Notes</div>
+        <div class="field">
+          <label>Notes (optional)</label>
+          <textarea id="notes" placeholder="FOB terms, minimum order, payment terms, any relevant conditions…"></textarea>
+        </div>
+        <div class="field" style="margin-top:12px">
+          <label>Your name / company (optional)</label>
+          <input type="text" id="supplierName" placeholder="e.g. Budi — PT Kayu Jati Nusantara">
+        </div>
+      </div>
+
+      <div class="spinner" id="spinner">Submitting your quote…</div>
+      <button class="btn-submit" type="submit" id="submitBtn">Submit Quote →</button>
+    </form>
+  </div>
+</main>
+
+<script>
+// Extract rfq_id and token from URL path: /supplier-quote/{rfq_id}/{token}
+const parts = location.pathname.split('/').filter(Boolean);
+const rfqId = parts[parts.length - 2];
+const token = parts[parts.length - 1];
+
+const BASE = location.origin;
+let rfqData = null;
+
+async function loadRFQ() {
+  try {
+    const r = await fetch(`${BASE}/supplier-quote/${rfqId}/${token}/data`);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.detail || `Server error ${r.status}`);
+    }
+    rfqData = await r.json();
+    renderForm(rfqData);
+  } catch (e) {
+    document.getElementById('loadingMsg').style.display = 'none';
+    showBanner('error', `Could not load RFQ: ${e.message}`);
+  }
+}
+
+function renderForm(data) {
+  document.getElementById('loadingMsg').style.display = 'none';
+  document.getElementById('formContainer').style.display = 'block';
+
+  // RFQ info bar
+  document.getElementById('rfqInfo').innerHTML = `
+    <div class="field"><div class="label">RFQ Ref</div><div class="value">${data.rfq_ref}</div></div>
+    <div class="field"><div class="label">Destination</div><div class="value">${data.destination}</div></div>
+    <div class="field"><div class="label">Origin Port</div><div class="value">${data.origin_port}</div></div>
+    <div class="field"><div class="label">Items</div><div class="value">${data.line_items.length}</div></div>
+  `;
+
+  // Line item forms
+  const container = document.getElementById('lineItems');
+  data.line_items.forEach((item, i) => {
+    const targetHint = item.expected_rate
+      ? `<div class="target">Buyer target: ${item.expected_rate} ${item.expected_rate_currency}/CBM</div>`
+      : '';
+    container.innerHTML += `
+      <div class="section">
+        <div class="section-title"><span class="num">${i + 1}</span> ${item.product_type} — ${item.wood_species}</div>
+        <div class="item-header">
+          <h3>${item.product_type} · ${item.wood_species} · Grade ${item.quality_grade}</h3>
+          <p>Dimensions: ${item.dimensions} &nbsp;|&nbsp; Qty: ${item.quantity} ${item.quantity_unit} &nbsp;|&nbsp; Container: ${item.container_size}</p>
+          ${targetHint}
+        </div>
+        <input type="hidden" class="line-item-id" value="${item.line_item_id}">
+        <div class="price-row" style="margin-bottom:12px">
+          <div class="field">
+            <label>Your price *</label>
+            <input type="number" step="0.01" min="0" class="price-input" placeholder="e.g. 820" required>
+          </div>
+          <div class="field">
+            <label>Currency</label>
+            <select class="currency-select">
+              <option value="USD">USD</option>
+              <option value="INR">INR</option>
+              <option value="IDR">IDR</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Per</label>
+            <select class="unit-select">
+              <option value="cbm">CBM</option>
+              <option value="piece">Piece</option>
+              <option value="set">Set</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Lead time (days) *</label>
+            <input type="number" min="1" class="lead-time-input" placeholder="e.g. 28" required>
+          </div>
+          <div class="field">
+            <label>Quality / grade notes</label>
+            <input type="text" class="quality-notes-input" placeholder="e.g. FSC certified, kiln dried">
+          </div>
+        </div>
+      </div>
+    `;
+  });
+}
+
+document.getElementById('quoteForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const spinner = document.getElementById('spinner');
+
+  btn.disabled = true;
+  spinner.classList.add('show');
+  clearBanners();
+
+  const sections = document.querySelectorAll('#lineItems .section');
+  const lineItems = [];
+
+  sections.forEach(sec => {
+    lineItems.push({
+      line_item_id:   sec.querySelector('.line-item-id').value,
+      price_per_unit: parseFloat(sec.querySelector('.price-input').value),
+      price_currency: sec.querySelector('.currency-select').value,
+      price_unit:     sec.querySelector('.unit-select').value,
+      lead_time_days: parseInt(sec.querySelector('.lead-time-input').value) || null,
+      quality_notes:  sec.querySelector('.quality-notes-input').value || null,
+    });
+  });
+
+  const payload = {
+    supplier_name: document.getElementById('supplierName').value || null,
+    line_items: lineItems,
+    notes: document.getElementById('notes').value || null,
+  };
+
+  try {
+    const r = await fetch(`${BASE}/supplier-quote/${rfqId}/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || `Error ${r.status}`);
+
+    spinner.classList.remove('show');
+    document.getElementById('quoteForm').style.display = 'none';
+    showBanner('success', `✅ ${j.message} (${j.items_submitted} item${j.items_submitted !== 1 ? 's' : ''} submitted)`);
+  } catch (err) {
+    spinner.classList.remove('show');
+    btn.disabled = false;
+    showBanner('error', `❌ Submission failed: ${err.message}`);
+  }
+});
+
+function showBanner(type, msg) {
+  const el = document.getElementById(type === 'error' ? 'errorBanner' : 'successBanner');
+  el.textContent = msg;
+  el.classList.add('show');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function clearBanners() {
+  document.getElementById('errorBanner').classList.remove('show');
+  document.getElementById('successBanner').classList.remove('show');
+}
+
+loadRFQ();
+</script>
+</body>
+</html>

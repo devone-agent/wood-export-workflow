@@ -29,6 +29,7 @@ from src.calculations.pricing import price_line_item
 from src.freight.footnote import FreightFootnote
 from src.models.rfq import RFQ, RFQStatus
 from src.negotiation.engine import NegotiationEngine, NegotiationResult
+from src.models.negotiation import NegotiationStatus
 from src.supplier.comparator import build_comparison_matrix, normalise_response_price
 from src.supplier.dispatcher import dispatch_rfq_to_suppliers, DispatchChannel
 from src.supplier.rfq_builder import build_supplier_rfq
@@ -107,7 +108,41 @@ class WorkflowOrchestrator:
         ctx.rfq.status = RFQStatus.SENT_TO_SUPPLIERS
         ctx.stage = WorkflowStage.DISPATCHED
         logger.info("Dispatched to %d suppliers (%d failed)", len(results), len(failed))
+
+        # Send buyer confirmation
+        await self._send_buyer_confirmation(ctx)
+
         return ctx
+
+    async def _send_buyer_confirmation(self, ctx: WorkflowContext) -> None:
+        """Email the buyer confirming their RFQ has been received and sent to suppliers."""
+        rfq = ctx.rfq
+        if not rfq.buyer_email or not self.email_client:
+            return
+        n = len(rfq.line_items)
+        body = (
+            f"Dear {rfq.buyer_name},\n\n"
+            f"Thank you for your enquiry. We have received your request for quotation "
+            f"({n} line item{'s' if n != 1 else ''}) and our suppliers are being contacted now.\n\n"
+            f"RFQ Reference: {rfq.id}\n"
+            f"Destination:   {rfq.destination_country} ({rfq.destination_port})\n"
+            f"Origin:        {rfq.origin_port}\n\n"
+            f"We will come back to you with a formal quotation as soon as supplier "
+            f"responses are collected — typically within 24–48 hours.\n\n"
+            f"If you have any questions in the meantime, just reply to this email.\n\n"
+            f"Kind regards,\n"
+            f"Wood Export Team"
+        )
+        try:
+            await self.email_client.send(
+                to=rfq.buyer_email,
+                to_name=rfq.buyer_name,
+                subject=f"RFQ Received — {rfq.id[:8].upper()} | {rfq.destination_country}",
+                body=body,
+            )
+            logger.info("Buyer confirmation sent to %s", rfq.buyer_email)
+        except Exception as exc:
+            logger.warning("Could not send buyer confirmation: %s", exc)
 
     # ── STEPS 3 & 4 ────────────────────────────────────────────────────────────
 
@@ -152,7 +187,7 @@ class WorkflowOrchestrator:
 
     # ── STEP 5 ─────────────────────────────────────────────────────────────────
 
-    def generate_quote(
+    async def generate_quote(
         self,
         ctx: WorkflowContext,
         freight: Optional[FreightFootnote] = None,
@@ -200,7 +235,37 @@ class WorkflowOrchestrator:
         ctx.rfq.status = RFQStatus.QUOTE_SENT
         ctx.stage = WorkflowStage.QUOTED
         logger.info("Quote generated: %s", ctx.current_quote.quote_ref)
+
+        # Email the quote to the buyer
+        await self._send_buyer_quote(ctx)
+
         return ctx
+
+    async def _send_buyer_quote(self, ctx: WorkflowContext) -> None:
+        """Email the formatted quotation to the buyer."""
+        rfq = ctx.rfq
+        quote = ctx.current_quote
+        if not rfq.buyer_email or not self.email_client or quote is None:
+            return
+        body = (
+            f"Dear {rfq.buyer_name},\n\n"
+            f"Please find your quotation below.\n\n"
+            f"{quote.to_text()}\n\n"
+            f"This quote is valid for {quote.validity_days} days from today.\n\n"
+            f"To discuss pricing further, simply reply to this email or contact us directly.\n\n"
+            f"Kind regards,\n"
+            f"Wood Export Team"
+        )
+        try:
+            await self.email_client.send(
+                to=rfq.buyer_email,
+                to_name=rfq.buyer_name,
+                subject=f"Quotation {quote.quote_ref} — {rfq.destination_country}",
+                body=body,
+            )
+            logger.info("Quote %s emailed to %s", quote.quote_ref, rfq.buyer_email)
+        except Exception as exc:
+            logger.warning("Could not email quote to buyer: %s", exc)
 
     # ── STEP 6 ─────────────────────────────────────────────────────────────────
 
@@ -239,7 +304,8 @@ class WorkflowOrchestrator:
         ctx.stage = WorkflowStage.NEGOTIATING
 
         # If feasible, regenerate the quote at the buyer's target rate
-        if result.status.value == "feasible":
+        # Compare against enum or plain string (robust to Pydantic round-trip)
+        if result.status == NegotiationStatus.FEASIBLE:
             ctx = self._regenerate_at_target(ctx, result.buyer_target_usd)
 
         return ctx, result

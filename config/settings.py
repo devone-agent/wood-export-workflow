@@ -19,9 +19,15 @@ class Settings:
     # ── Anthropic (for AI parsing) ────────────────────────────────────────────
     anthropic_api_key: Optional[str] = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY"))
 
-    # ── Gmail ─────────────────────────────────────────────────────────────────
-    gmail_credentials: Optional[str] = field(default_factory=lambda: os.getenv("GMAIL_CREDENTIALS"))
-    gmail_sender: Optional[str] = field(default_factory=lambda: os.getenv("GMAIL_SENDER"))
+    # ── Email — Hostinger SMTP + IMAP ─────────────────────────────────────────
+    email_host: str = field(default_factory=lambda: os.getenv("EMAIL_HOST", "smtp.hostinger.com"))
+    email_port: int = field(default_factory=lambda: int(os.getenv("EMAIL_PORT", "587")))
+    email_user: Optional[str] = field(default_factory=lambda: os.getenv("EMAIL_USER"))
+    email_password: Optional[str] = field(default_factory=lambda: os.getenv("EMAIL_PASSWORD"))
+    email_sender_name: str = field(default_factory=lambda: os.getenv("EMAIL_SENDER_NAME", "Wood Export Bot"))
+    imap_host: str = field(default_factory=lambda: os.getenv("IMAP_HOST", "imap.hostinger.com"))
+    imap_port: int = field(default_factory=lambda: int(os.getenv("IMAP_PORT", "993")))
+    imap_poll_interval: int = field(default_factory=lambda: int(os.getenv("IMAP_POLL_INTERVAL", "60")))
 
     # ── Twilio / WhatsApp ─────────────────────────────────────────────────────
     twilio_account_sid: Optional[str] = field(default_factory=lambda: os.getenv("TWILIO_ACCOUNT_SID"))
@@ -40,8 +46,8 @@ class Settings:
 
     def missing_integrations(self) -> list[str]:
         missing = []
-        if not self.gmail_credentials or not self.gmail_sender:
-            missing.append("Gmail (GMAIL_CREDENTIALS, GMAIL_SENDER)")
+        if not self.email_user or not self.email_password:
+            missing.append("Email (EMAIL_USER, EMAIL_PASSWORD)")
         if not all([self.twilio_account_sid, self.twilio_auth_token, self.twilio_whatsapp_from]):
             missing.append("WhatsApp/Twilio (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM)")
         if not self.airtable_api_key or not self.airtable_base_id:

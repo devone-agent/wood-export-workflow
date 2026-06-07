@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wood Export — Buyer RFQ Form</title>
+<style>
+  :root {
+    --brown:     #5c3d1e;
+    --brown-lt:  #7a5230;
+    --gold:      #c8922a;
+    --gold-lt:   #e8b04a;
+    --cream:     #faf6f0;
+    --warm-grey: #f0e9df;
+    --border:    #d4c4ad;
+    --text:      #2c1a0e;
+    --text-muted:#7a6652;
+    --success:   #2d6a4f;
+    --error:     #c0392b;
+    --radius:    8px;
+    --shadow:    0 2px 12px rgba(92,61,30,.12);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--warm-grey);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--brown);
+    color: #fff;
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  header .logo { font-size: 28px; }
+  header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: .3px; }
+  header p  { font-size: .82rem; opacity: .75; margin-top: 2px; }
+
+  /* ── Layout ── */
+  main {
+    max-width: 900px;
+    margin: 32px auto;
+    padding: 0 16px 60px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+  }
+  .card-header {
+    background: var(--cream);
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card-header .icon { font-size: 18px; }
+  .card-header h2 { font-size: 1rem; font-weight: 600; color: var(--brown); }
+  .card-body { padding: 20px; }
+
+  /* ── Grid ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media(max-width:640px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+  .span-2 { grid-column: span 2; }
+  @media(max-width:640px) { .span-2 { grid-column: span 1; } }
+
+  /* ── Form elements ── */
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  label { font-size: .8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; }
+  input, select {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: .92rem;
+    color: var(--text);
+    background: #fff;
+    transition: border .15s, box-shadow .15s;
+    width: 100%;
+  }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(200,146,42,.15);
+  }
+  input::placeholder { color: #bbb; }
+
+  /* ── Dimension row ── */
+  .dim-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 90px;
+    gap: 8px;
+    align-items: end;
+  }
+  .dim-row label { display: block; margin-bottom: 5px; }
+  @media(max-width:640px) { .dim-row { grid-template-columns: 1fr 1fr; } }
+
+  /* ── Line items ── */
+  .line-item {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--cream);
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .line-item-header {
+    background: var(--brown);
+    color: #fff;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: .88rem;
+    font-weight: 600;
+  }
+  .line-item-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  .remove-btn {
+    background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.3);
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: .78rem;
+    transition: background .15s;
+  }
+  .remove-btn:hover { background: rgba(255,255,255,.32); }
+
+  .add-line-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: #fff;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    color: var(--brown-lt);
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    justify-content: center;
+    transition: border-color .15s, color .15s;
+  }
+  .add-line-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+  /* ── Submit ── */
+  .submit-area { margin-top: 8px; }
+  .submit-btn {
+    width: 100%;
+    padding: 15px;
+    background: var(--brown);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 700;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    letter-spacing: .5px;
+    transition: background .15s, transform .1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+  .submit-btn:hover:not(:disabled) { background: var(--brown-lt); }
+  .submit-btn:active:not(:disabled) { transform: scale(.99); }
+  .submit-btn:disabled { opacity: .65; cursor: not-allowed; }
+
+  /* ── Spinner ── */
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Status banner ── */
+  .status-banner {
+    display: none;
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-top: 20px;
+    font-size: .92rem;
+    line-height: 1.5;
+  }
+  .status-banner.success {
+    background: #d8f3dc;
+    border: 1px solid #74c69d;
+    color: var(--success);
+  }
+  .status-banner.error {
+    background: #fde8e8;
+    border: 1px solid #e08080;
+    color: var(--error);
+  }
+  .status-banner h3 { font-size: 1rem; margin-bottom: 6px; }
+  .rfq-id-badge {
+    display: inline-block;
+    background: var(--success);
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: .9rem;
+    letter-spacing: .5px;
+    margin-top: 4px;
+  }
+
+  /* ── Progress steps ── */
+  .progress-steps {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    font-size: .8rem;
+  }
+  .step { display: flex; align-items: center; gap: 5px; color: var(--text-muted); }
+  .step.done { color: var(--success); }
+  .step.active { color: var(--gold); font-weight: 600; }
+  .step-dot {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: .7rem; color: #fff; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .step.done .step-dot { background: var(--success); }
+  .step.active .step-dot { background: var(--gold); }
+
+  /* ── API URL config ── */
+  .api-config {
+    font-size: .78rem;
+    color: var(--text-muted);
+    text-align: right;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .api-config input {
+    width: 220px;
+    padding: 4px 8px;
+    font-size: .78rem;
+    border-color: var(--border);
+  }
+
+  .hint { font-size: .75rem; color: var(--text-muted); margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🪵</div>
+  <div>
+    <h1>Wood Export — Request for Quote</h1>
+    <p>Indonesia → India · Submit your timber requirements and we'll reach out to suppliers immediately</p>
+  </div>
+</header>
+
+<main>
+
+  <!-- API config -->
+  <div class="api-config">
+    <span>API:</span>
+    <input type="text" id="apiBase" placeholder="http://localhost:8000 (leave blank when served from same server)" />
+  </div>
+
+  <!-- ── Buyer Details ── -->
+  <div class="card">
+    <div class="card-header">
+      <span class="icon">👤</span>
+      <h2>Buyer Details</h2>
+    </div>
+    <div class="card-body">
+      <div class="grid-2" style="gap:16px">
+        <div class="field">
+          <label>Full Name *</label>
+          <input type="text" id="buyer_name" placeholder="e.g. Raj Sharma" required>
+        </div>
+        <div class="field">
+          <label>Email *</label>
+          <input type="email" id="buyer_email" placeholder="raj@company.in" required>
+        </div>
+        <div class="field">
+          <label>WhatsApp Number</label>
+          <input type="tel" id="buyer_whatsapp" placeholder="+91 98765 43210">
+          <span class="hint">Include country code. Used for quote delivery.</span>
+        </div>
+        <div class="field">
+          <label>Preferred Quote Currency</label>
+          <select id="preferred_currency">
+            <option value="USD">USD — US Dollar</option>
+            <option value="INR">INR — Indian Rupee</option>
+            <option value="IDR">IDR — Indonesian Rupiah</option>
+            <option value="EUR">EUR — Euro</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Logistics ── -->
+  <div class="card">
+    <div class="card-header">
+      <span class="icon">🚢</span>
+      <h2>Logistics</h2>
+    </div>
+    <div class="card-body">
+      <div class="grid-3">
+        <div class="field">
+          <label>Origin Port</label>
+          <select id="origin_port">
+            <option value="Tanjung Priok">Tanjung Priok (Jakarta)</option>
+            <option value="Tanjung Perak">Tanjung Perak (Surabaya)</option>
+            <option value="Belawan">Belawan (Medan)</option>
+            <option value="Makassar">Makassar</option>
+            <option value="Balikpapan">Balikpapan</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Destination Country</label>
+          <input type="text" id="destination_country" value="India" readonly style="background:#f5f5f5;color:#888">
+        </div>
+        <div class="field">
+          <label>Destination Port</label>
+          <select id="destination_port">
+            <option value="Nhava Sheva">Nhava Sheva (Mumbai)</option>
+            <option value="Chennai">Chennai</option>
+            <option value="Kolkata">Kolkata</option>
+            <option value="Mundra">Mundra</option>
+            <option value="Vizag">Vizag</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Line Items ── -->
+  <div class="card">
+    <div class="card-header">
+      <span class="icon">📦</span>
+      <h2>Timber Requirements</h2>
+    </div>
+    <div class="card-body">
+      <div id="lineItemsContainer"></div>
+      <button type="button" class="add-line-btn" onclick="addLineItem()">
+        <span>＋</span> Add Another Product
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Submit ── -->
+  <div class="submit-area">
+    <button class="submit-btn" id="submitBtn" onclick="submitForm()">
+      <div class="spinner" id="spinner"></div>
+      <span id="submitLabel">Submit RFQ &amp; Dispatch to Suppliers</span>
+    </button>
+
+    <div class="status-banner" id="statusBanner">
+      <h3 id="bannerTitle"></h3>
+      <div id="bannerBody"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Line item counter ──────────────────────────────────────────────────────────
+let lineCount = 0;
+
+const PRODUCT_TYPES = [
+  ['sawn_timber',    'Sawn Timber'],
+  ['panelling',      'Panelling'],
+  ['flooring',       'Flooring'],
+  ['ready_furniture','Ready Furniture'],
+];
+
+const WOOD_SPECIES = [
+  ['teak_a',      'Teak Grade A'],
+  ['teak_b',      'Teak Grade B'],
+  ['teak_c',      'Teak Grade C'],
+  ['mahogany',    'Mahogany'],
+  ['meranti',     'Meranti'],
+  ['terrambese',  'Terrambese'],
+  ['berangkai',   'Berangkai'],
+  ['plywood',     'Plywood'],
+  ['veneer',      'Veneer'],
+  ['mdf',         'MDF'],
+  ['other',       'Other'],
+];
+
+function sel(opts, id, def='') {
+  return `<select id="${id}">${opts.map(([v,l]) =>
+    `<option value="${v}"${v===def?' selected':''}>${l}</option>`).join('')}</select>`;
+}
+
+function addLineItem() {
+  lineCount++;
+  const n = lineCount;
+  const div = document.createElement('div');
+  div.className = 'line-item';
+  div.id = `li-${n}`;
+  div.innerHTML = `
+    <div class="line-item-header">
+      <span>Line Item ${n}</span>
+      ${n > 1 ? `<button class="remove-btn" onclick="removeLineItem(${n})">✕ Remove</button>` : ''}
+    </div>
+    <div class="line-item-body">
+
+      <div class="grid-3">
+        <div class="field">
+          <label>Product Type *</label>
+          ${sel(PRODUCT_TYPES, `pt-${n}`, 'sawn_timber')}
+        </div>
+        <div class="field">
+          <label>Wood Species *</label>
+          ${sel(WOOD_SPECIES, `ws-${n}`, 'teak_a')}
+        </div>
+        <div class="field">
+          <label>Quality Grade</label>
+          <select id="qg-${n}">
+            <option value="A">Grade A</option>
+            <option value="B">Grade B</option>
+            <option value="C">Grade C</option>
+            <option value="N/A">Not Specified</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Dimensions (L × W × H)</label>
+        <div class="dim-row">
+          <div>
+            <label style="font-size:.72rem;color:var(--text-muted)">LENGTH</label>
+            <input type="number" id="len-${n}" placeholder="2.4" step="0.01" min="0" value="2.4">
+          </div>
+          <div>
+            <label style="font-size:.72rem;color:var(--text-muted)">WIDTH</label>
+            <input type="number" id="wid-${n}" placeholder="0.1" step="0.001" min="0" value="0.1">
+          </div>
+          <div>
+            <label style="font-size:.72rem;color:var(--text-muted)">HEIGHT</label>
+            <input type="number" id="hei-${n}" placeholder="0.05" step="0.001" min="0" value="0.05">
+          </div>
+          <div>
+            <label style="font-size:.72rem;color:var(--text-muted)">UNIT</label>
+            <select id="unit-${n}">
+              <option value="m" selected>m</option>
+              <option value="cm">cm</option>
+              <option value="ft">ft</option>
+              <option value="mm">mm</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="field">
+          <label>Quantity *</label>
+          <input type="number" id="qty-${n}" placeholder="100" min="1" value="100">
+        </div>
+        <div class="field">
+          <label>Quantity Unit</label>
+          <select id="qu-${n}">
+            <option value="pieces">Pieces</option>
+            <option value="cbm">CBM</option>
+            <option value="sets">Sets</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Container Size</label>
+          <select id="cs-${n}">
+            <option value="20ft">20ft</option>
+            <option value="40ft">40ft</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label>Expected Rate (per CBM)</label>
+          <input type="number" id="er-${n}" placeholder="800" step="0.01" min="0">
+        </div>
+        <div class="field">
+          <label>Rate Currency</label>
+          <select id="erc-${n}">
+            <option value="USD">USD</option>
+            <option value="INR">INR</option>
+            <option value="IDR">IDR</option>
+            <option value="EUR">EUR</option>
+          </select>
+        </div>
+      </div>
+
+    </div>
+  `;
+  document.getElementById('lineItemsContainer').appendChild(div);
+}
+
+function removeLineItem(n) {
+  document.getElementById(`li-${n}`).remove();
+}
+
+// ── Form collection ────────────────────────────────────────────────────────────
+function v(id) { return document.getElementById(id)?.value?.trim() || ''; }
+function n(id) { const x = parseFloat(v(id)); return isNaN(x) ? null : x; }
+
+function collectPayload() {
+  const errors = [];
+  const buyerName  = v('buyer_name');
+  const buyerEmail = v('buyer_email');
+  if (!buyerName)  errors.push('Buyer name is required.');
+  if (!buyerEmail) errors.push('Buyer email is required.');
+
+  const lineItems = [];
+  document.querySelectorAll('.line-item').forEach(el => {
+    const id = el.id.replace('li-', '');
+    const qty = n(`qty-${id}`);
+    if (!qty || qty < 1) { errors.push(`Line item ${id}: quantity must be ≥ 1.`); return; }
+    const len = n(`len-${id}`), wid = n(`wid-${id}`), hei = n(`hei-${id}`);
+    if (!len || !wid || !hei) { errors.push(`Line item ${id}: all dimensions required.`); return; }
+
+    const li = {
+      product_type: v(`pt-${id}`),
+      wood_species:  v(`ws-${id}`),
+      quality_grade: v(`qg-${id}`),
+      length: len,
+      width:  wid,
+      height: hei,
+      unit:   v(`unit-${id}`),
+      quantity: qty,
+      quantity_unit: v(`qu-${id}`),
+      container_size: v(`cs-${id}`),
+    };
+    const er = n(`er-${id}`);
+    if (er) {
+      li.expected_rate = er;
+      li.expected_rate_currency = v(`erc-${id}`);
+    }
+    lineItems.push(li);
+  });
+
+  if (lineItems.length === 0) errors.push('Add at least one line item.');
+  if (errors.length) return { errors };
+
+  const payload = {
+    buyer_name: buyerName,
+    buyer_email: buyerEmail,
+    destination_country: v('destination_country') || 'India',
+    destination_port: v('destination_port'),
+    origin_port: v('origin_port'),
+    preferred_currency: v('preferred_currency'),
+    line_items: lineItems,
+  };
+  const wa = v('buyer_whatsapp');
+  if (wa) payload.buyer_whatsapp = wa;
+  return { payload };
+}
+
+// ── Submit ─────────────────────────────────────────────────────────────────────
+async function submitForm() {
+  const banner = document.getElementById('statusBanner');
+  banner.style.display = 'none';
+
+  const { payload, errors } = collectPayload();
+  if (errors) {
+    showBanner('error', '⚠️ Please fix the following:', errors.map(e => `• ${e}`).join('<br>'));
+    return;
+  }
+
+  // When served from the same origin (e.g. http://localhost:8000/form),
+  // leave the API field blank and requests go to the same host automatically.
+  const apiBase = (v('apiBase') || '').replace(/\/$/, '');
+  const btn     = document.getElementById('submitBtn');
+  const spinner = document.getElementById('spinner');
+  const label   = document.getElementById('submitLabel');
+
+  btn.disabled = true;
+  spinner.style.display = 'block';
+
+  try {
+    // Step 1 — create RFQ
+    label.textContent = 'Creating RFQ…';
+    const r1 = await fetch(`${apiBase}/rfq`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r1.ok) {
+      const err = await r1.json().catch(() => ({ detail: r1.statusText }));
+      throw new Error(`RFQ creation failed: ${JSON.stringify(err.detail || err)}`);
+    }
+    const rfqData = await r1.json();
+    const rfqId   = rfqData.rfq_id;
+
+    // Step 2 — dispatch
+    label.textContent = 'Dispatching to suppliers…';
+    const r2 = await fetch(`${apiBase}/rfq/${rfqId}/dispatch`, { method: 'POST' });
+    const dispatchData = await r2.json().catch(() => ({}));
+
+    const warnings = dispatchData.errors?.length
+      ? `<br><br><strong>Note:</strong> ${dispatchData.errors.join('; ')}`
+      : '';
+
+    showBanner('success',
+      '✅ RFQ submitted and dispatched!',
+      `Your RFQ has been created and sent to our supplier network.<br>
+       RFQ ID: <span class="rfq-id-badge">${rfqId}</span><br><br>
+       Suppliers will respond within <strong>24–48 hours</strong>.
+       We'll send your quote to <strong>${payload.buyer_email}</strong>.${warnings}`
+    );
+    document.getElementById('submitBtn').style.display = 'none';
+
+  } catch (err) {
+    showBanner('error', '❌ Submission failed', err.message);
+    btn.disabled = false;
+  } finally {
+    spinner.style.display = 'none';
+    label.textContent = 'Submit RFQ & Dispatch to Suppliers';
+  }
+}
+
+function showBanner(type, title, body) {
+  const banner = document.getElementById('statusBanner');
+  banner.className = `status-banner ${type}`;
+  banner.style.display = 'block';
+  document.getElementById('bannerTitle').textContent = title;
+  document.getElementById('bannerBody').innerHTML = body;
+  banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+addLineItem();
+</script>
+</body>
+</html>

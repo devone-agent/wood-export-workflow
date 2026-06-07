@@ -9,31 +9,20 @@ from pydantic import BaseModel
 
 from src.buyer.form import validate_buyer_form, form_to_rfq
 from src.orchestrator import WorkflowOrchestrator, WorkflowContext
+from src.store import get_context_store
 
 router = APIRouter()
-
-# In-memory store (replace with Airtable/DB in production)
-_contexts: dict[str, WorkflowContext] = {}
 
 
 def _get_orchestrator() -> WorkflowOrchestrator:
     """Build orchestrator from environment config."""
     import os
-    from src.integrations.gmail import GmailClient
+    from src.integrations.email import get_email_client
     from src.integrations.whatsapp import WhatsAppClient
 
-    email_client = None
+    email_client = get_email_client()
+
     whatsapp_client = None
-
-    if os.getenv("GMAIL_CREDENTIALS") and os.getenv("GMAIL_SENDER"):
-        try:
-            email_client = GmailClient(
-                os.getenv("GMAIL_CREDENTIALS"),
-                os.getenv("GMAIL_SENDER"),
-            )
-        except Exception:
-            pass
-
     if all(os.getenv(k) for k in ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"]):
         try:
             whatsapp_client = WhatsAppClient(
@@ -61,7 +50,9 @@ async def submit_rfq(body: dict):
 
     rfq = form_to_rfq(form)
     ctx = WorkflowContext(rfq=rfq)
-    _contexts[rfq.id] = ctx
+
+    store = get_context_store()
+    store.save(rfq.id, ctx)
 
     return {
         "rfq_id": rfq.id,
@@ -76,22 +67,20 @@ async def submit_rfq(body: dict):
 @router.post("/{rfq_id}/dispatch")
 async def dispatch_rfq(rfq_id: str):
     """Step 2 — Dispatch RFQ to suppliers."""
-    ctx = _contexts.get(rfq_id)
+    store = get_context_store()
+    ctx = store.load(rfq_id)
     if not ctx:
         raise HTTPException(status_code=404, detail="RFQ not found")
 
     from src.integrations.airtable import get_airtable_client
     airtable = get_airtable_client()
-    suppliers = (
-        airtable.get_all_active_suppliers() if airtable
-        else []
-    )
+    suppliers = airtable.get_all_active_suppliers() if airtable else []
     if not suppliers:
         raise HTTPException(status_code=503, detail="No suppliers available (check Airtable config)")
 
     orchestrator = _get_orchestrator()
     ctx = await orchestrator.dispatch_to_suppliers(ctx, suppliers)
-    _contexts[rfq_id] = ctx
+    store.save(rfq_id, ctx)
 
     return {
         "rfq_id": rfq_id,
@@ -105,7 +94,8 @@ async def dispatch_rfq(rfq_id: str):
 
 @router.get("/{rfq_id}")
 async def get_rfq(rfq_id: str):
-    ctx = _contexts.get(rfq_id)
+    store = get_context_store()
+    ctx = store.load(rfq_id)
     if not ctx:
         raise HTTPException(status_code=404, detail="RFQ not found")
     return {
@@ -133,7 +123,8 @@ class QuoteRequest(BaseModel):
 @router.post("/{rfq_id}/quote")
 async def generate_quote(rfq_id: str, body: QuoteRequest):
     """Step 5 — Generate buyer quote from collected supplier responses."""
-    ctx = _contexts.get(rfq_id)
+    store = get_context_store()
+    ctx = store.load(rfq_id)
     if not ctx:
         raise HTTPException(status_code=404, detail="RFQ not found")
     if not ctx.supplier_quotes:
@@ -153,11 +144,14 @@ async def generate_quote(rfq_id: str, body: QuoteRequest):
             logistics_partner=body.freight_logistics_partner,
         )
 
-    ctx = orchestrator.generate_quote(ctx, freight=freight)
-    _contexts[rfq_id] = ctx
+    errors_before = set(ctx.errors)
+    ctx = await orchestrator.generate_quote(ctx, freight=freight)
+    store.save(rfq_id, ctx)
 
-    if ctx.errors:
-        raise HTTPException(status_code=422, detail=ctx.errors)
+    # Only fail if the quote itself couldn't be built
+    if ctx.current_quote is None:
+        new_errors = [e for e in ctx.errors if e not in errors_before]
+        raise HTTPException(status_code=422, detail=new_errors or ctx.errors)
 
     return ctx.current_quote.to_dict()
 
@@ -172,27 +166,49 @@ class NegotiationRequest(BaseModel):
 @router.post("/{rfq_id}/negotiate")
 async def negotiate(rfq_id: str, body: NegotiationRequest):
     """Step 6 — Submit buyer counter-offer rate."""
-    ctx = _contexts.get(rfq_id)
+    import logging, traceback as _tb
+    _log = logging.getLogger(__name__)
+
+    store = get_context_store()
+    ctx = store.load(rfq_id)
     if not ctx:
         raise HTTPException(status_code=404, detail="RFQ not found")
 
-    orchestrator = _get_orchestrator()
-    ctx, result = orchestrator.handle_negotiation(
-        ctx,
-        buyer_target_rate=body.target_rate,
-        buyer_target_currency=body.currency,
-    )
-    _contexts[rfq_id] = ctx
+    # Rebuild matrix if lost (e.g. after a restart)
+    if ctx.comparison_matrix is None and ctx.supplier_quotes:
+        orchestrator = _get_orchestrator()
+        ctx = orchestrator.build_matrix(ctx)
 
+    if not ctx.comparison_matrix or not ctx.comparison_matrix.line_comparisons:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot negotiate: comparison matrix empty. "
+                   f"supplier_quotes={len(ctx.supplier_quotes)}",
+        )
+
+    orchestrator = _get_orchestrator()
+    try:
+        ctx, result = orchestrator.handle_negotiation(
+            ctx,
+            buyer_target_rate=body.target_rate,
+            buyer_target_currency=body.currency,
+        )
+    except Exception as exc:
+        _log.error("handle_negotiation error: %s\n%s", exc, _tb.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
+
+    store.save(rfq_id, ctx)
+
+    _status_val = result.status.value if hasattr(result.status, "value") else str(result.status)
     response = {
         "rfq_id": rfq_id,
         "round": result.round_number,
-        "status": result.status.value,
+        "status": _status_val,
         "message": result.message,
         "buyer_target_usd": result.buyer_target_usd,
         "minimum_achievable_usd": result.minimum_achievable_usd,
     }
-    if result.status.value == "feasible" and ctx.current_quote:
+    if _status_val == "feasible" and ctx.current_quote:
         response["revised_quote"] = ctx.current_quote.to_dict()
 
     return response
