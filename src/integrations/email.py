@@ -1,23 +1,20 @@
 """
-Email integration — Hostinger SMTP (outbound) + IMAP polling (inbound).
-
-No third-party email SDK needed — uses Python's built-in smtplib / imaplib.
+Email integration — Resend API (outbound) + IMAP polling (inbound).
 
 Outbound:
-  smtp.hostinger.com:587 (STARTTLS)
+  Resend HTTP API — works on all cloud platforms (no SMTP port restrictions).
+  Sign up at resend.com, verify your domain, get an API key.
 
 Inbound (supplier replies):
-  imap.hostinger.com:993 (SSL)
-  Poll via poll_new_replies() — call this on a background loop or scheduled task.
+  imap.titan.email:993 (SSL)
+  Poll via poll_new_replies() — called on a background loop.
 
 Env vars:
-  EMAIL_HOST          smtp.hostinger.com
-  EMAIL_PORT          587
-  EMAIL_USER          pav@instructset.com
-  EMAIL_PASSWORD      <password>
-  IMAP_HOST           imap.hostinger.com
+  RESEND_API_KEY      re_xxxx...
+  EMAIL_USER          pav@instructset.com   (used as From address)
+  EMAIL_SENDER_NAME   Wood Export Bot       (optional)
+  IMAP_HOST           imap.titan.email
   IMAP_PORT           993
-  EMAIL_SENDER_NAME   Wood Export Bot   (optional)
 """
 from __future__ import annotations
 
@@ -25,31 +22,23 @@ import email as email_lib
 import imaplib
 import logging
 import os
-import smtplib
-import ssl
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class EmailClient:
-    """SMTP email client for outbound RFQ dispatch (Hostinger)."""
+    """Outbound email via Resend HTTP API — no SMTP port restrictions."""
 
     def __init__(
         self,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
+        api_key: str,
+        from_address: str,
         sender_name: str = "Wood Export Bot",
     ):
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
-        self.sender = f"{sender_name} <{user}>"
+        self.api_key = api_key
+        self.from_address = from_address
+        self.sender = f"{sender_name} <{from_address}>"
 
     async def send(
         self,
@@ -60,43 +49,37 @@ class EmailClient:
         to_name: Optional[str] = None,
         html_body: Optional[str] = None,
     ) -> Optional[str]:
-        """
-        Send a plain-text email via SMTP.
-        Returns the Message-ID on success.
-        Runs synchronously inside an async wrapper (SMTP is blocking but fast).
-        """
-        import asyncio
-        return await asyncio.get_event_loop().run_in_executor(
-            None, self._send_sync, to, subject, body, reply_to, to_name, html_body
-        )
+        """Send via Resend API. Returns message ID on success."""
+        import httpx
 
-    def _send_sync(
-        self,
-        to: str,
-        subject: str,
-        body: str,
-        reply_to: Optional[str],
-        to_name: Optional[str],
-        html_body: Optional[str] = None,
-    ) -> str:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = self.sender
-        msg["To"] = f"{to_name} <{to}>" if to_name else to
-        msg["Subject"] = subject
-        if reply_to:
-            msg["Reply-To"] = reply_to
-        # Plain text first (fallback), then HTML (preferred by clients that support it)
-        msg.attach(MIMEText(body, "plain", "utf-8"))
+        to_formatted = f"{to_name} <{to}>" if to_name else to
+
+        payload: dict = {
+            "from": self.sender,
+            "to": [to_formatted],
+            "subject": subject,
+            "text": body,
+        }
         if html_body:
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
+            payload["html"] = html_body
+        if reply_to:
+            payload["reply_to"] = [reply_to]
 
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL(self.host, self.port, context=ctx, timeout=15) as smtp:
-            smtp.login(self.user, self.password)
-            smtp.sendmail(self.user, [to], msg.as_bytes())
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
 
-        msg_id = msg.get("Message-ID", "sent")
-        logger.info("Email sent to=%s subject='%s'", to, subject)
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Resend API error {resp.status_code}: {resp.text}")
+
+        msg_id = resp.json().get("id", "sent")
+        logger.info("Email sent via Resend to=%s subject='%s' id=%s", to, subject, msg_id)
         return msg_id
 
 
@@ -182,17 +165,18 @@ def parse_sendgrid_inbound(form_data: dict) -> dict:
 
 
 def get_email_client() -> Optional[EmailClient]:
-    """Build an EmailClient from environment variables."""
-    user = os.getenv("EMAIL_USER")
-    password = os.getenv("EMAIL_PASSWORD")
-    host = os.getenv("EMAIL_HOST", "smtp.hostinger.com")
-    port = int(os.getenv("EMAIL_PORT", "587"))
+    """Build an EmailClient from environment variables (uses Resend API)."""
+    api_key = os.getenv("RESEND_API_KEY")
+    from_address = os.getenv("EMAIL_USER")
     sender_name = os.getenv("EMAIL_SENDER_NAME", "Wood Export Bot")
 
-    if not user or not password:
-        logger.warning("EMAIL_USER or EMAIL_PASSWORD not set — email disabled")
+    if not api_key:
+        logger.warning("RESEND_API_KEY not set — outbound email disabled")
         return None
-    return EmailClient(host=host, port=port, user=user, password=password, sender_name=sender_name)
+    if not from_address:
+        logger.warning("EMAIL_USER not set — outbound email disabled")
+        return None
+    return EmailClient(api_key=api_key, from_address=from_address, sender_name=sender_name)
 
 
 def get_imap_client() -> Optional[IMAPClient]:

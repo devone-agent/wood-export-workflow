@@ -44,7 +44,7 @@ IMAP_POLL_INTERVAL = int(os.getenv("IMAP_POLL_INTERVAL", "60"))  # seconds
 
 # ── Startup env diagnostics (values masked) ───────────────────────────────────
 _REQUIRED_VARS = [
-    "EMAIL_USER", "EMAIL_PASSWORD", "EMAIL_HOST", "EMAIL_PORT",
+    "RESEND_API_KEY", "EMAIL_USER",
     "IMAP_HOST", "IMAP_PORT",
     "AIRTABLE_API_KEY", "AIRTABLE_BASE_ID",
     "SECRET_KEY", "SERVER_BASE_URL",
