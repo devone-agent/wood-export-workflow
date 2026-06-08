@@ -171,11 +171,10 @@ class WorkflowOrchestrator:
             f"Buyer Name    : {rfq.buyer_name}\n"
             f"Buyer Email   : {rfq.buyer_email}\n"
             f"Buyer WhatsApp: {rfq.buyer_whatsapp or '—'}\n"
-            f"Company       : {rfq.buyer_company or '—'}\n\n"
             f"Destination   : {rfq.destination_country} — {rfq.destination_port or ''}\n"
             f"Origin Port   : {rfq.origin_port or 'Indonesia'}\n\n"
             f"ITEMS REQUESTED:\n{items_text}\n\n"
-            f"RFQ dispatched to {len(ctx.rfq.line_items and rfq.line_items)} line item(s).\n"
+            f"RFQ dispatched to {len(rfq.line_items)} line item(s).\n"
             f"Suppliers have been contacted and are awaiting their responses.\n\n"
             f"— Wood Export Bot"
         )
