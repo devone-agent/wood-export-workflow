@@ -619,6 +619,9 @@ async function submitForm() {
     label.textContent = 'Dispatching to suppliers…';
     const r2 = await fetch(`${apiBase}/rfq/${rfqId}/dispatch`, { method: 'POST' });
     const dispatchData = await r2.json().catch(() => ({}));
+    if (!r2.ok) {
+      throw new Error(`Dispatch failed: ${JSON.stringify(dispatchData.detail || dispatchData)}`);
+    }
 
     const warnings = dispatchData.errors?.length
       ? `<br><br><strong>Note:</strong> ${dispatchData.errors.join('; ')}`
