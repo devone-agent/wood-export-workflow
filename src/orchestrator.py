@@ -170,7 +170,7 @@ class WorkflowOrchestrator:
             f"RFQ Reference : {rfq.id}\n"
             f"Buyer Name    : {rfq.buyer_name}\n"
             f"Buyer Email   : {rfq.buyer_email}\n"
-            f"Buyer Phone   : {rfq.buyer_phone or '—'}\n"
+            f"Buyer WhatsApp: {rfq.buyer_whatsapp or '—'}\n"
             f"Company       : {rfq.buyer_company or '—'}\n\n"
             f"Destination   : {rfq.destination_country} — {rfq.destination_port or ''}\n"
             f"Origin Port   : {rfq.origin_port or 'Indonesia'}\n\n"

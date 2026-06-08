@@ -265,6 +265,8 @@ class AirtableStore(ContextStore):
             if existing_id:
                 self._at.update_record("RFQs", existing_id, human_fields)
             else:
+                from datetime import datetime, timezone
+                human_fields["Created At"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 record = self._at.create_record("RFQs", human_fields)
                 self._record_id_cache[rfq_id] = record["id"]
 
