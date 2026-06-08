@@ -42,6 +42,22 @@ logger = logging.getLogger(__name__)
 
 IMAP_POLL_INTERVAL = int(os.getenv("IMAP_POLL_INTERVAL", "60"))  # seconds
 
+# ── Startup env diagnostics (values masked) ───────────────────────────────────
+_REQUIRED_VARS = [
+    "EMAIL_USER", "EMAIL_PASSWORD", "EMAIL_HOST", "EMAIL_PORT",
+    "IMAP_HOST", "IMAP_PORT",
+    "AIRTABLE_API_KEY", "AIRTABLE_BASE_ID",
+    "SECRET_KEY", "SERVER_BASE_URL",
+]
+def _log_env_check():
+    for var in _REQUIRED_VARS:
+        val = os.getenv(var)
+        if val:
+            masked = val[:4] + "****" if len(val) > 4 else "****"
+            logger.info("ENV %s = %s", var, masked)
+        else:
+            logger.warning("ENV %s = NOT SET", var)
+
 
 async def _imap_poll_loop():
     """
@@ -94,6 +110,7 @@ async def _imap_poll_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Wood Export Bot starting up")
+    _log_env_check()
     task = asyncio.create_task(_imap_poll_loop())
     yield
     task.cancel()
