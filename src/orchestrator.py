@@ -113,8 +113,10 @@ class WorkflowOrchestrator:
         import asyncio
         await asyncio.sleep(1)
 
-        # Send buyer confirmation
+        # Send buyer confirmation + operator notification
         await self._send_buyer_confirmation(ctx)
+        await asyncio.sleep(0.3)
+        await self._notify_operator_buyer_rfq(ctx)
 
         return ctx
 
@@ -147,6 +149,82 @@ class WorkflowOrchestrator:
             logger.info("Buyer confirmation sent to %s", rfq.buyer_email)
         except Exception as exc:
             logger.warning("Could not send buyer confirmation: %s", exc)
+
+    async def _notify_operator_buyer_rfq(self, ctx: WorkflowContext) -> None:
+        """Notify operator when a buyer submits an RFQ. Operator sees buyer details; suppliers are never mentioned."""
+        import os
+        operator_email = os.getenv("OPERATOR_EMAIL")
+        if not operator_email or not self.email_client:
+            return
+        rfq = ctx.rfq
+        items_text = "\n".join(
+            f"  {i+1}. {li.product_type.value.replace('_',' ').title()} — "
+            f"{li.wood_species.value.replace('_',' ').title()} Grade {li.quality_grade.value} | "
+            f"Qty: {li.quantity} {li.quantity_unit.value}"
+            for i, li in enumerate(rfq.line_items)
+        )
+        body = (
+            f"═══════════════════════════════════\n"
+            f"  NEW BUYER RFQ RECEIVED\n"
+            f"═══════════════════════════════════\n\n"
+            f"RFQ Reference : {rfq.id}\n"
+            f"Buyer Name    : {rfq.buyer_name}\n"
+            f"Buyer Email   : {rfq.buyer_email}\n"
+            f"Buyer Phone   : {rfq.buyer_phone or '—'}\n"
+            f"Company       : {rfq.buyer_company or '—'}\n\n"
+            f"Destination   : {rfq.destination_country} — {rfq.destination_port or ''}\n"
+            f"Origin Port   : {rfq.origin_port or 'Indonesia'}\n\n"
+            f"ITEMS REQUESTED:\n{items_text}\n\n"
+            f"RFQ dispatched to {len(ctx.rfq.line_items and rfq.line_items)} line item(s).\n"
+            f"Suppliers have been contacted and are awaiting their responses.\n\n"
+            f"— Wood Export Bot"
+        )
+        try:
+            await self.email_client.send(
+                to=operator_email,
+                subject=f"[BUYER] New RFQ {rfq.id[:8].upper()} — {rfq.buyer_name} | {rfq.destination_country}",
+                body=body,
+            )
+            logger.info("Operator notified of buyer RFQ %s", rfq.id[:8].upper())
+        except Exception as exc:
+            logger.warning("Could not send operator buyer notification: %s", exc)
+
+    async def _notify_operator_supplier_quote(
+        self,
+        ctx: WorkflowContext,
+        supplier_name: str,
+        supplier_email: str,
+        line_items_summary: str,
+        notes: str = "",
+    ) -> None:
+        """Notify operator when a supplier submits a quote. Buyer details are never included."""
+        import os
+        operator_email = os.getenv("OPERATOR_EMAIL")
+        if not operator_email or not self.email_client:
+            return
+        rfq = ctx.rfq
+        body = (
+            f"═══════════════════════════════════\n"
+            f"  SUPPLIER QUOTE RECEIVED\n"
+            f"═══════════════════════════════════\n\n"
+            f"RFQ Reference  : {rfq.id}\n"
+            f"Supplier Name  : {supplier_name}\n"
+            f"Supplier Email : {supplier_email}\n\n"
+            f"Destination    : {rfq.destination_country} — {rfq.destination_port or ''}\n"
+            f"Origin Port    : {rfq.origin_port or 'Indonesia'}\n\n"
+            f"QUOTED PRICES:\n{line_items_summary}\n"
+            + (f"\nSupplier Notes : {notes}\n" if notes else "")
+            + f"\n— Wood Export Bot"
+        )
+        try:
+            await self.email_client.send(
+                to=operator_email,
+                subject=f"[SUPPLIER] Quote from {supplier_name} — RFQ {rfq.id[:8].upper()}",
+                body=body,
+            )
+            logger.info("Operator notified of supplier quote from %s", supplier_name)
+        except Exception as exc:
+            logger.warning("Could not send operator supplier notification: %s", exc)
 
     # ── STEPS 3 & 4 ────────────────────────────────────────────────────────────
 

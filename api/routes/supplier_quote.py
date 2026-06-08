@@ -148,6 +148,27 @@ async def submit_supplier_quote(rfq_id: str, token: str, body: SupplierQuoteSubm
         rfq_id, supplier_id, len(line_items),
     )
 
+    # Notify operator — separate email, buyer details never included
+    from src.orchestrator import WorkflowOrchestrator
+    from src.integrations.email import get_email_client
+    items_summary = "\n".join(
+        f"  {i+1}. Line {li.line_item_id[:8]} — "
+        f"{li.price_per_unit} {li.price_currency}/{li.price_unit}"
+        + (f" | Lead time: {li.lead_time_days} days" if li.lead_time_days else "")
+        + (f" | Notes: {li.quality_notes}" if li.quality_notes else "")
+        for i, li in enumerate(body.line_items)
+    )
+    orch = WorkflowOrchestrator(email_client=get_email_client())
+    import asyncio
+    await asyncio.sleep(0.3)
+    await orch._notify_operator_supplier_quote(
+        ctx=ctx,
+        supplier_name=body.supplier_name or supplier_id,
+        supplier_email=supplier_id,
+        line_items_summary=items_summary,
+        notes=body.notes or "",
+    )
+
     # Trigger auto-quote (same logic as IMAP/webhook)
     from api.routes.webhook import _auto_quote_if_ready
     await _auto_quote_if_ready(rfq_id, ctx)
