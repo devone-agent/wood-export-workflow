@@ -109,6 +109,10 @@ class WorkflowOrchestrator:
         ctx.stage = WorkflowStage.DISPATCHED
         logger.info("Dispatched to %d suppliers (%d failed)", len(results), len(failed))
 
+        # Brief pause so we don't hit Resend's 5 req/sec rate limit
+        import asyncio
+        await asyncio.sleep(1)
+
         # Send buyer confirmation
         await self._send_buyer_confirmation(ctx)
 
